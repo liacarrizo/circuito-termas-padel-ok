@@ -472,7 +472,7 @@ function ModalPago({ jugador, torneos, precioBotella, alias, onClose, onEnviar }
           <div className="monto-total">{fmt(total)}</div>
           <p style={{ textAlign: "center", color: "var(--light)", fontSize: "0.78rem", marginBottom: "1.25rem" }}>Podés pagar parcialmente si lo necesitás.</p>
           <div className="field-group"><label>Monto a transferir</label><input className="inp" type="number" value={monto} onChange={(e) => setMonto(e.target.value)} /></div>
-          <div className="field-group"><label>Tu nombre en la transferencia</label><input className="inp" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Juan Pérez" /></div>
+          <div className="field-group"><label>A nombre de quién aparece la transferencia</label><input className="inp" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Juan Pérez" /></div>
           <div className="field-group"><label>Concepto</label>
             <select value={concepto} onChange={(e) => setConcepto(e.target.value)}>
               {detalle.map((d, i) => <option key={i} value={d.concepto}>{d.concepto}</option>)}
