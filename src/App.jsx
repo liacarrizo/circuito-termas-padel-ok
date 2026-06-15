@@ -327,17 +327,20 @@ function useSheetData() {
         dni: clean(r.dni),
         nombre: clean(r.nombre),
         torneo_id: clean(r.torneo_id),
-        categoria: clean(r.categoria),
-        catFacu: clean(r["cat Facu"]),
-        pareja: clean(r.pareja),
+        categorias: [
+          { categoria: clean(r.categoria), puntos: num(r.puntos) },
+          { categoria: clean(r["categoria 2"]), puntos: num(r["puntos 2"]) },
+          { categoria: clean(r["categoria 3"]), puntos: num(r["puntos 3"]) },
+        ].filter((c) => c.categoria),
         inscripto: isTrue(r.inscripto),
         pagado50: isTrue(r["pagado50%"]),
         pagado100: isTrue(r["pagado100%"]),
         metodoPago: clean(r.metodo_pago),
         botellas: num(r.botellas),
+        deudaArrastre: num(r.deuda_arrastre),
+        deudaDetalle: clean(r.deuda_detalle),
         botellasDeuda: num(r.botellas_deuda),
         resultado: clean(r.resultado),
-        puntos: num(r.puntos),
       }));
 
       const pagos = pagosRows.map((r) => ({
@@ -373,18 +376,21 @@ function useSheetData() {
 function buildRanking(insc, categoriaFiltro) {
   const map = {};
   insc.forEach((row) => {
-    if (!row.nombre || !row.puntos) return;
-    if (categoriaFiltro && row.categoria.toUpperCase() !== categoriaFiltro.toUpperCase()) return;
-    if (!map[row.nombre]) map[row.nombre] = { nombre: row.nombre, puntos: 0, detalle: [] };
-    map[row.nombre].puntos += row.puntos;
-    map[row.nombre].detalle.push({ resultado: row.resultado, categoria: row.categoria, puntos: row.puntos, torneo_id: row.torneo_id });
+    if (!row.nombre) return;
+    row.categorias.forEach((c) => {
+      if (!c.puntos) return;
+      if (categoriaFiltro && c.categoria.toUpperCase() !== categoriaFiltro.toUpperCase()) return;
+      if (!map[row.nombre]) map[row.nombre] = { nombre: row.nombre, puntos: 0, detalle: [] };
+      map[row.nombre].puntos += c.puntos;
+      map[row.nombre].detalle.push({ categoria: c.categoria, puntos: c.puntos });
+    });
   });
   return Object.values(map).sort((a, b) => b.puntos - a.puntos);
 }
 
 function getCategorias(insc) {
   const set = new Set();
-  insc.forEach((r) => { if (r.categoria) set.add(r.categoria.toUpperCase()); });
+  insc.forEach((r) => r.categorias.forEach((c) => set.add(c.categoria.toUpperCase())));
   const arr = Array.from(set);
   arr.sort((a, b) => {
     const ia = CATEGORIA_ORDEN.indexOf(a);
@@ -398,27 +404,34 @@ function getCategorias(insc) {
 }
 
 function getJugadorByDni(insc, dni) {
-  const rows = insc.filter((r) => r.dni && r.dni === dni && r.torneo_id);
-  if (rows.length === 0) return null;
-  return { dni, nombre: rows[0].nombre, filas: rows };
+  const row = insc.find((r) => r.dni && r.dni === dni);
+  if (!row) return null;
+  return row;
 }
 
-function calcularDeuda(filas, torneos, precioBotella) {
+function calcularDeuda(jugador, torneos, precioBotella) {
   let total = 0; const detalle = [];
-  filas.forEach((t) => {
-    const cfg = torneos[t.torneo_id];
-    if (!cfg || !t.inscripto) return;
-    if (!t.pagado50) { total += cfg.inscripcion / 2; detalle.push({ concepto: `${cfg.nombre} — 50% inscripción`, monto: cfg.inscripcion / 2 }); }
-    else if (!t.pagado100) { total += cfg.inscripcion / 2; detalle.push({ concepto: `${cfg.nombre} — saldo inscripción`, monto: cfg.inscripcion / 2 }); }
-    if (t.botellasDeuda > 0) { const m = t.botellasDeuda * precioBotella; total += m; detalle.push({ concepto: `${cfg.nombre} — ${t.botellasDeuda} botella(s)`, monto: m }); }
-  });
+  if (jugador.deudaArrastre > 0) {
+    total += jugador.deudaArrastre;
+    detalle.push({ concepto: jugador.deudaDetalle || "Deuda de torneos anteriores", monto: jugador.deudaArrastre });
+  }
+  const cfg = torneos[jugador.torneo_id];
+  if (cfg && jugador.inscripto) {
+    if (!jugador.pagado50) { total += cfg.inscripcion / 2; detalle.push({ concepto: `${cfg.nombre} — 50% inscripción`, monto: cfg.inscripcion / 2 }); }
+    else if (!jugador.pagado100) { total += cfg.inscripcion / 2; detalle.push({ concepto: `${cfg.nombre} — saldo inscripción`, monto: cfg.inscripcion / 2 }); }
+  }
+  if (jugador.botellasDeuda > 0) {
+    const m = jugador.botellasDeuda * precioBotella;
+    total += m;
+    detalle.push({ concepto: `${cfg ? cfg.nombre + " — " : ""}${jugador.botellasDeuda} botella(s)`, monto: m });
+  }
   return { total, detalle };
 }
 
 
 /* ─── MODAL PAGO ────────────────────────────────────────────────── */
 function ModalPago({ jugador, torneos, precioBotella, alias, onClose, onEnviar }) {
-  const { total, detalle } = calcularDeuda(jugador.filas, torneos, precioBotella);
+  const { total, detalle } = calcularDeuda(jugador, torneos, precioBotella);
   const [monto, setMonto] = useState(String(total));
   const [nombre, setNombre] = useState("");
   const [concepto, setConcepto] = useState(detalle[0]?.concepto || "");
@@ -472,7 +485,7 @@ function ModalPago({ jugador, torneos, precioBotella, alias, onClose, onEnviar }
           <div className="monto-total">{fmt(total)}</div>
           <p style={{ textAlign: "center", color: "var(--light)", fontSize: "0.78rem", marginBottom: "1.25rem" }}>Podés pagar parcialmente si lo necesitás.</p>
           <div className="field-group"><label>Monto a transferir</label><input className="inp" type="number" value={monto} onChange={(e) => setMonto(e.target.value)} /></div>
-          <div className="field-group"><label>A nombre de quién aparece la transferencia</label><input className="inp" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Juan Pérez" /></div>
+          <div className="field-group"><label>Tu nombre en la transferencia</label><input className="inp" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Juan Pérez" /></div>
           <div className="field-group"><label>Concepto</label>
             <select value={concepto} onChange={(e) => setConcepto(e.target.value)}>
               {detalle.map((d, i) => <option key={i} value={d.concepto}>{d.concepto}</option>)}
@@ -524,7 +537,7 @@ function Portal({ data, reload }) {
     else { setJugador(null); setErr("No encontramos ningún jugador con ese DNI cargado todavía. Si recién informaste tu DNI a Facundo, puede tardar un poco en aparecer."); }
   };
 
-  const { total, detalle } = jugador ? calcularDeuda(jugador.filas, torneos, precioBotella) : { total: 0, detalle: [] };
+  const { total, detalle } = jugador ? calcularDeuda(jugador, torneos, precioBotella) : { total: 0, detalle: [] };
   const puede = total === 0;
 
   const categorias = getCategorias(insc);
@@ -599,25 +612,39 @@ function Portal({ data, reload }) {
             </div>
 
             <div className="section">
-              <div className="section-title">Historial de torneos</div>
-              {jugador.filas.map((t, i) => {
-                const cfg = torneos[t.torneo_id];
-                return <div className="torn-item" key={i}>
+              <div className="section-title">Categorías y puntos</div>
+              <div className="torneos-list">
+                {jugador.categorias.length === 0 ? <p style={{ color: "var(--light)", fontSize: "0.85rem" }}>Todavía sin puntos registrados.</p> :
+                  jugador.categorias.map((c, i) => (
+                    <div className="torn-item" key={i}>
+                      <div className="torn-fields">
+                        <span className="chip chip-b">{c.categoria}</span>
+                        <span className="chip chip-gold">{c.puntos} pts</span>
+                      </div>
+                    </div>
+                  ))
+                }
+              </div>
+            </div>
+
+            {jugador.torneo_id && <div className="section">
+              <div className="section-title">Torneo actual</div>
+              {(() => {
+                const cfg = torneos[jugador.torneo_id];
+                return <div className="torn-item">
                   <div className="torn-header">
-                    <div><div className="torn-nombre">{cfg?.nombre || t.torneo_id}</div><div className="torn-sede">{cfg?.sede}</div></div>
-                    {t.resultado && <span className="chip chip-gold">{t.resultado}{t.puntos ? ` · ${t.puntos} pts` : ""}</span>}
+                    <div><div className="torn-nombre">{cfg?.nombre || jugador.torneo_id}</div><div className="torn-sede">{cfg?.sede}</div></div>
+                    {jugador.resultado && <span className="chip chip-gold">{jugador.resultado}</span>}
                   </div>
                   <div className="torn-fields">
                     <span className="torn-label">Pago:</span>
-                    <span className={`chip ${t.pagado100 ? "chip-g" : t.pagado50 ? "chip-o" : "chip-r"}`}>{t.pagado100 ? "Completo" : t.pagado50 ? "50% pagado" : "Sin pago"}</span>
-                    {t.metodoPago && <span className="chip chip-gr">{t.metodoPago}</span>}
-                    {t.categoria && <span className="chip chip-b">{t.categoria}</span>}
-                    {t.pareja && <><span className="torn-label" style={{ marginLeft: "0.3rem" }}>Pareja:</span><span style={{ color: "var(--off)", fontSize: "0.82rem" }}>{t.pareja}</span></>}
-                    {t.botellasDeuda > 0 && <span className="chip chip-r">{t.botellasDeuda} bot. sin pagar</span>}
+                    <span className={`chip ${jugador.pagado100 ? "chip-g" : jugador.pagado50 ? "chip-o" : "chip-r"}`}>{jugador.pagado100 ? "Completo" : jugador.pagado50 ? "50% pagado" : "Sin pago"}</span>
+                    {jugador.metodoPago && <span className="chip chip-gr">{jugador.metodoPago}</span>}
+                    {jugador.botellasDeuda > 0 && <span className="chip chip-r">{jugador.botellasDeuda} bot. sin pagar</span>}
                   </div>
                 </div>;
-              })}
-            </div>
+              })()}
+            </div>}
 
             {puede && <div className="alert alert-g"><span className="alert-icon">🎾</span><div><strong>¡Estás al día!</strong><p>Podés inscribirte al próximo torneo. Contactá a la organización para reservar tu plaza.</p></div></div>}
           </div>}
@@ -650,7 +677,7 @@ function Portal({ data, reload }) {
                   <div className="rank-pos">{posReal}</div>
                   <div style={{ flex: 1 }}>
                     <div className="rank-nombre">{r.nombre}</div>
-                    {r.detalle.length > 0 && <div className="rank-det">{r.detalle.map((d) => `${d.resultado} (${d.categoria})`).join(" · ")}</div>}
+                    {r.detalle.length > 0 && <div className="rank-det">{r.detalle.map((d) => `${d.categoria}: ${d.puntos} pts`).join(" · ")}</div>}
                   </div>
                   <div className="rank-pts">{r.puntos} pts</div>
                 </div>;
