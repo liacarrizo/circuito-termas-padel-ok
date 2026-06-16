@@ -323,25 +323,30 @@ function useSheetData() {
       const config = {};
       configRows.forEach((r) => { config[clean(r.clave)] = clean(r.valor); });
 
-      const insc = inscripciones.map((r) => ({
-        dni: clean(r.dni),
-        nombre: clean(r.nombre),
-        torneo_id: clean(r.torneo_id),
-        categorias: [
-          { categoria: clean(r.categoria), puntos: num(r.puntos) },
-          { categoria: clean(r["categoria 2"]), puntos: num(r["puntos 2"]) },
-          { categoria: clean(r["categoria 3"]), puntos: num(r["puntos 3"]) },
-        ].filter((c) => c.categoria),
-        inscripto: isTrue(r.inscripto),
-        pagado50: isTrue(r["pagado50%"]),
-        pagado100: isTrue(r["pagado100%"]),
-        metodoPago: clean(r.metodo_pago),
-        botellas: num(r.botellas),
-        deudaArrastre: num(r.deuda_arrastre),
-        deudaDetalle: clean(r.deuda_detalle),
-        botellasDeuda: num(r.botellas_deuda),
-        resultado: clean(r.resultado),
-      }));
+      const insc = inscripciones.map((r) => {
+        const catTorneoRaw = clean(r.cat_torneo);
+        const catTorneo = catTorneoRaw ? catTorneoRaw.split(",").map(s => s.trim()).filter(Boolean) : [];
+        return {
+          dni: clean(r.dni),
+          nombre: clean(r.nombre),
+          torneo_id: clean(r.torneo_id),
+          catTorneo,
+          categorias: [
+            { categoria: clean(r.categoria), puntos: num(r.puntos) },
+            { categoria: clean(r["categoria 2"]), puntos: num(r["puntos 2"]) },
+            { categoria: clean(r["categoria 3"]), puntos: num(r["puntos 3"]) },
+          ].filter((c) => c.categoria),
+          inscripto: isTrue(r.inscripto),
+          anticipo: num(r.anticipo),
+          pagado100: isTrue(r["pagado100%"]),
+          metodoPago: clean(r.metodo_pago),
+          botellas: num(r.botellas),
+          deudaArrastre: num(r.deuda_arrastre),
+          deudaDetalle: clean(r.deuda_detalle),
+          botellasDeuda: num(r.botellas_deuda),
+          resultado: clean(r.resultado),
+        };
+      });
 
       const pagos = pagosRows.map((r) => ({
         id: clean(r.id),
@@ -416,9 +421,17 @@ function calcularDeuda(jugador, torneos, precioBotella) {
     detalle.push({ concepto: jugador.deudaDetalle || "Deuda de torneos anteriores", monto: jugador.deudaArrastre });
   }
   const cfg = torneos[jugador.torneo_id];
-  if (cfg && jugador.inscripto) {
-    if (!jugador.pagado50) { total += cfg.inscripcion / 2; detalle.push({ concepto: `${cfg.nombre} — 50% inscripción`, monto: cfg.inscripcion / 2 }); }
-    else if (!jugador.pagado100) { total += cfg.inscripcion / 2; detalle.push({ concepto: `${cfg.nombre} — saldo inscripción`, monto: cfg.inscripcion / 2 }); }
+  if (cfg && jugador.inscripto && jugador.anticipo > 0 && !jugador.pagado100) {
+    const cantCat = jugador.catTorneo.length > 0 ? jugador.catTorneo.length : 1;
+    const totalInscripcion = cfg.inscripcion * cantCat;
+    const saldo = Math.max(0, totalInscripcion - jugador.anticipo);
+    if (saldo > 0) {
+      const concepto = cantCat > 1
+        ? `${cfg.nombre} — saldo (${cantCat} categorías)`
+        : `${cfg.nombre} — saldo inscripción`;
+      total += saldo;
+      detalle.push({ concepto, monto: saldo });
+    }
   }
   if (jugador.botellasDeuda > 0) {
     const m = jugador.botellasDeuda * precioBotella;
@@ -548,10 +561,24 @@ function Portal({ data, reload }) {
   const rankingGeneral = buildRanking(insc, null);
 
   const proximos = Object.values(torneos).filter((t) => t.estado !== "finalizado");
-  const categoriasPorTorneo = {};
+
+  // Calcular inscriptos por torneo+categoría automáticamente desde inscripciones
+  // Cada jugador con inscripto=TRUE cuenta 0.5 (porque el cupo es por parejas)
+  const cuposPorTorneo = {};
   data.categorias.forEach((c) => {
-    if (!categoriasPorTorneo[c.torneo_id]) categoriasPorTorneo[c.torneo_id] = [];
-    categoriasPorTorneo[c.torneo_id].push(c);
+    const key = c.torneo_id;
+    if (!cuposPorTorneo[key]) cuposPorTorneo[key] = [];
+    cuposPorTorneo[key].push({ ...c, inscriptosCalc: 0 });
+  });
+  insc.forEach((j) => {
+    if (!j.inscripto || !j.torneo_id || j.catTorneo.length === 0) return;
+    j.catTorneo.forEach((cat) => {
+      const cats = cuposPorTorneo[j.torneo_id];
+      if (!cats) return;
+      const catNorm = cat.trim().toUpperCase();
+      const found = cats.find((c) => c.categoria_id.trim().toUpperCase() === catNorm);
+      if (found) found.inscriptosCalc += 0.5;
+    });
   });
 
   return (
@@ -631,17 +658,36 @@ function Portal({ data, reload }) {
               <div className="section-title">Torneo actual</div>
               {(() => {
                 const cfg = torneos[jugador.torneo_id];
+                const cantCat = jugador.catTorneo.length > 0 ? jugador.catTorneo.length : 1;
+                const totalInscripcion = cfg ? cfg.inscripcion * cantCat : 0;
+                const sinSeña = jugador.inscripto && jugador.anticipo === 0 && !jugador.pagado100;
                 return <div className="torn-item">
                   <div className="torn-header">
-                    <div><div className="torn-nombre">{cfg?.nombre || jugador.torneo_id}</div><div className="torn-sede">{cfg?.sede}</div></div>
+                    <div>
+                      <div className="torn-nombre">{cfg?.nombre || jugador.torneo_id}</div>
+                      <div className="torn-sede">{cfg?.sede}</div>
+                    </div>
                     {jugador.resultado && <span className="chip chip-gold">{jugador.resultado}</span>}
                   </div>
-                  <div className="torn-fields">
-                    <span className="torn-label">Pago:</span>
-                    <span className={`chip ${jugador.pagado100 ? "chip-g" : jugador.pagado50 ? "chip-o" : "chip-r"}`}>{jugador.pagado100 ? "Completo" : jugador.pagado50 ? "50% pagado" : "Sin pago"}</span>
-                    {jugador.metodoPago && <span className="chip chip-gr">{jugador.metodoPago}</span>}
-                    {jugador.botellasDeuda > 0 && <span className="chip chip-r">{jugador.botellasDeuda} bot. sin pagar</span>}
-                  </div>
+                  {jugador.catTorneo.length > 0 && <div className="torn-fields" style={{ marginBottom: "0.5rem" }}>
+                    <span className="torn-label">Categoría{jugador.catTorneo.length > 1 ? "s" : ""}:</span>
+                    {jugador.catTorneo.map((c, i) => <span key={i} className="chip chip-b">{c}</span>)}
+                    {jugador.catTorneo.length > 1 && <span className="chip chip-gr">{fmt(totalInscripcion)} total</span>}
+                  </div>}
+                  {sinSeña
+                    ? <div style={{ background: "rgba(232,136,42,0.08)", border: "1px solid rgba(232,136,42,0.2)", borderRadius: "8px", padding: "0.75rem 1rem", marginTop: "0.5rem" }}>
+                        <p style={{ color: "var(--orange)", fontWeight: 700, fontSize: "0.88rem", marginBottom: "0.25rem" }}>⚠ Inscripto sin anticipo</p>
+                        <p style={{ color: "var(--light)", fontSize: "0.82rem" }}>Señá tu lugar para reservar la plaza en este torneo.</p>
+                      </div>
+                    : <div className="torn-fields">
+                        <span className="torn-label">Estado:</span>
+                        <span className={`chip ${jugador.pagado100 ? "chip-g" : jugador.anticipo > 0 ? "chip-o" : "chip-r"}`}>
+                          {jugador.pagado100 ? "Pagado completo" : jugador.anticipo > 0 ? `Anticipo: ${fmt(jugador.anticipo)}` : "Sin pago"}
+                        </span>
+                        {jugador.metodoPago && <span className="chip chip-gr">{jugador.metodoPago}</span>}
+                        {jugador.botellasDeuda > 0 && <span className="chip chip-r">{jugador.botellasDeuda} bot. sin pagar</span>}
+                      </div>
+                  }
                 </div>;
               })()}
             </div>}
@@ -703,17 +749,26 @@ function Portal({ data, reload }) {
                   {t.estado !== "finalizado" ? <><div className="proximo-precio">{fmt(t.inscripcion)}</div><div className="proximo-precio-sub">por jugador</div></> : <span className="chip chip-gr">Finalizado</span>}
                 </div>
               </div>
-              {categoriasPorTorneo[t.torneo_id] && categoriasPorTorneo[t.torneo_id].length > 0 && <div className="cat-list">
-                {categoriasPorTorneo[t.torneo_id].map((c, i) => {
-                  const libre = c.cupoTotal - c.inscriptos;
-                  const pct = c.cupoTotal ? (c.inscriptos / c.cupoTotal) * 100 : 0;
+              {cuposPorTorneo[t.torneo_id] && cuposPorTorneo[t.torneo_id].length > 0 && <div className="cat-list">
+                {cuposPorTorneo[t.torneo_id].map((c, i) => {
+                  const inscriptos = c.inscriptosCalc || 0;
+                  const libre = c.cupoTotal - inscriptos;
+                  const pct = c.cupoTotal ? (inscriptos / c.cupoTotal) * 100 : 0;
                   const agotado = c.cupoTotal > 0 && libre <= 0;
                   const casi = pct >= 80 && !agotado;
+                  const sinPareja = inscriptos % 1 !== 0; // tiene .5 → alguien sin pareja
                   return <div className="cat-row" key={i}>
                     <span className="cat-name">{c.categoria_id}</span>
                     <div className="cat-cupo">
                       <div className="cupo-bar"><div className={`cupo-fill ${agotado ? "full" : casi ? "almost" : ""}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div>
-                      {agotado ? <span className="cupo-agotado">Sin cupos</span> : t.estado === "finalizado" ? <span className="cupo-text">Finalizado</span> : <span className="cupo-text">{libre} lugar{libre !== 1 ? "es" : ""}</span>}
+                      {agotado
+                        ? <span className="cupo-agotado">Sin cupos</span>
+                        : t.estado === "finalizado"
+                          ? <span className="cupo-text">Finalizado</span>
+                          : <span className="cupo-text" title={sinPareja ? "Hay un jugador sin pareja confirmada" : ""}>
+                              {sinPareja ? `${Math.floor(libre)} lugares ⚠` : `${libre} lugar${libre !== 1 ? "es" : ""}`}
+                            </span>
+                      }
                     </div>
                   </div>;
                 })}
