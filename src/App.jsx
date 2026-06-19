@@ -421,14 +421,14 @@ function calcularDeuda(jugador, torneos, precioBotella) {
     detalle.push({ concepto: jugador.deudaDetalle || "Deuda de torneos anteriores", monto: jugador.deudaArrastre });
   }
   const cfg = torneos[jugador.torneo_id];
-  if (cfg && jugador.inscripto && jugador.anticipo > 0 && !jugador.pagado100) {
+  if (cfg && jugador.inscripto && !jugador.pagado100) {
     const cantCat = jugador.catTorneo.length > 0 ? jugador.catTorneo.length : 1;
     const totalInscripcion = cfg.inscripcion * cantCat;
     const saldo = Math.max(0, totalInscripcion - jugador.anticipo);
     if (saldo > 0) {
-      const concepto = cantCat > 1
-        ? `${cfg.nombre} — saldo (${cantCat} categorías)`
-        : `${cfg.nombre} — saldo inscripción`;
+      const concepto = jugador.anticipo > 0
+        ? (cantCat > 1 ? `${cfg.nombre} — saldo (${cantCat} categorías)` : `${cfg.nombre} — saldo inscripción`)
+        : (cantCat > 1 ? `${cfg.nombre} — inscripción (${cantCat} categorías)` : `${cfg.nombre} — inscripción completa`);
       total += saldo;
       detalle.push({ concepto, monto: saldo });
     }
@@ -832,3 +832,7 @@ export default function App() {
     </div>
   );
 }
+
+
+
+
