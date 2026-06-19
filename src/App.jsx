@@ -421,7 +421,10 @@ function calcularDeuda(jugador, torneos, precioBotella) {
     detalle.push({ concepto: jugador.deudaDetalle || "Deuda de torneos anteriores", monto: jugador.deudaArrastre });
   }
   const cfg = torneos[jugador.torneo_id];
-  if (cfg && jugador.inscripto && !jugador.pagado100) {
+  // ✅ CORREGIDO: Usa catTorneo (categoría cargada) en lugar de inscripto
+  // Razón: jugador puede tener inscripto=FALSE pero catTorneo cargado (ej: en espera)
+  // y aún así debe ver deuda de seña si anticipo está vacío
+  if (cfg && jugador.catTorneo.length > 0 && !jugador.pagado100) {
     const cantCat = jugador.catTorneo.length > 0 ? jugador.catTorneo.length : 1;
     const totalInscripcion = cfg.inscripcion * cantCat;
     const saldo = Math.max(0, totalInscripcion - jugador.anticipo);
