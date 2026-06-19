@@ -615,7 +615,7 @@ function Portal({ data, reload }) {
               <span className={`badge ${puede ? "badge-g" : "badge-r"}`}>{puede ? "✓ Al día" : "✗ Con deuda"}</span>
             </div>
 
-            {!puede && <div className="alert alert-r"><span className="alert-icon">⚠️</span><div><strong>No podés inscribirte al próximo torneo</strong><p>Debés saldar {fmt(total)} antes de reservar tu plaza.</p></div></div>}
+            {!puede && <div className="alert alert-r"><span className="alert-icon">⚠️</span><div><strong>Para inscribirte al próximo torneo</strong><p>Debés saldar {fmt(total)} para reservar tu plaza.</p></div></div>}
 
             {detalle.length > 0 && <div className="section">
               <div className="section-title">Deuda pendiente</div>
