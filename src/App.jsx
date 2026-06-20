@@ -284,26 +284,55 @@ body{background:var(--black);font-family:'Barlow',sans-serif;color:var(--white)}
 `;
 
 /* ─── DATA FETCHING ─────────────────────────────────────────────── */
-async function fetchSheet(sheetName) {
+// ✅ OPTIMIZACIÓN: Caché en localStorage para reducir requests a SheetDB
+// 70% del límite alcanzado → necesitamos reducir requests dramáticamente
+async function fetchSheet(sheetName, forceRefresh = false) {
+  const cacheKey = `sheetdb_${sheetName}`;
+  const cacheTimeKey = `${cacheKey}_time`;
+  const CACHE_DURATION = 3600000; // 1 hora en ms
+  
+  // Si no forzamos refresh, intentar usar caché
+  if (!forceRefresh) {
+    const cached = localStorage.getItem(cacheKey);
+    const cacheTime = localStorage.getItem(cacheTimeKey);
+    
+    if (cached && cacheTime) {
+      const age = Date.now() - parseInt(cacheTime);
+      if (age < CACHE_DURATION) {
+        console.log(`✅ Usando caché para "${sheetName}" (${Math.round(age / 1000)}s de antigüedad)`);
+        return JSON.parse(cached);
+      }
+    }
+  }
+  
+  // Hacer request a SheetDB
   const url = `${SHEETDB_URL}?sheet=${encodeURIComponent(sheetName)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Error leyendo hoja "${sheetName}" (${res.status})`);
-  return res.json();
+  
+  const data = await res.json();
+  
+  // Guardar en caché
+  localStorage.setItem(cacheKey, JSON.stringify(data));
+  localStorage.setItem(cacheTimeKey, String(Date.now()));
+  console.log(`📥 Datos descargados y cacheados para "${sheetName}"`);
+  
+  return data;
 }
 
 function useSheetData() {
   const [state, setState] = useState({ loading: true, error: null, data: null });
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (forceRefresh = false) => {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
       const [jugadores, inscripciones, torneosRows, categoriasRows, configRows, pagosRows] = await Promise.all([
-        fetchSheet("jugadores"),
-        fetchSheet("inscripciones"),
-        fetchSheet("torneos"),
-        fetchSheet("categorías"),
-        fetchSheet("config"),
-        fetchSheet("pagos"),
+        fetchSheet("jugadores", forceRefresh),
+        fetchSheet("inscripciones", forceRefresh),
+        fetchSheet("torneos", forceRefresh),
+        fetchSheet("categorías", forceRefresh),
+        fetchSheet("config", forceRefresh),
+        fetchSheet("pagos", forceRefresh),
       ]);
 
       const torneos = {};
@@ -591,6 +620,35 @@ function Portal({ data, reload }) {
           <button key={v} className={`ptab ${tab === v ? "on" : ""}`} onClick={() => setTab(v)}>{l}</button>
         )}
       </div>
+      
+      {/* ✅ Botón de actualización manual para reducir uso de API */}
+      <div style={{ padding: "0.75rem 1.5rem", borderBottom: "1px solid var(--border2)", display: "flex", justifyContent: "flex-end", gap: "0.75rem" }}>
+        <button 
+          onClick={() => reload(true)} 
+          style={{
+            fontSize: "0.85rem",
+            padding: "0.5rem 1rem",
+            background: "transparent",
+            border: "1px solid var(--border2)",
+            color: "var(--light)",
+            borderRadius: "6px",
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+          onMouseOver={(e) => {
+            e.target.style.borderColor = "var(--gold)";
+            e.target.style.color = "var(--gold)";
+          }}
+          onMouseOut={(e) => {
+            e.target.style.borderColor = "var(--border2)";
+            e.target.style.color = "var(--light)";
+          }}
+          title="Actualiza los datos desde el Google Sheets (ignora caché)"
+        >
+          🔄 Actualizar datos
+        </button>
+      </div>
+      
       <div className="portal">
 
         {tab === "cuenta" && <>
@@ -615,7 +673,7 @@ function Portal({ data, reload }) {
               <span className={`badge ${puede ? "badge-g" : "badge-r"}`}>{puede ? "✓ Al día" : "✗ Con deuda"}</span>
             </div>
 
-            {!puede && <div className="alert alert-r"><span className="alert-icon">⚠️</span><div><strong>Para inscribirte al próximo torneo</strong><p>Debés saldar {fmt(total)} para reservar tu plaza.</p></div></div>}
+            {!puede && <div className="alert alert-r"><span className="alert-icon">⚠️</span><div><strong>Para inscribirte al próximo torneo</strong><p>Debés saldar {fmt(total)} para de reservar tu plaza.</p></div></div>}
 
             {detalle.length > 0 && <div className="section">
               <div className="section-title">Deuda pendiente</div>
